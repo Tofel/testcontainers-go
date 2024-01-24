@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -290,6 +291,10 @@ func Test_StartStop(t *testing.T) {
 }
 
 func TestContainerLogWithErrClosed(t *testing.T) {
+	if os.Getenv("XDG_RUNTIME_DIR") != "" {
+		t.Skip("Skipping as flaky on GitHub Actions, Please see https://github.com/testcontainers/testcontainers-go/issues/1924")
+	}
+
 	t.Cleanup(func() {
 		config.Reset()
 	})
@@ -452,4 +457,68 @@ func TestContainerLogsShouldBeWithoutStreamHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Equal(t, "0", strings.TrimSpace(string(b)))
+}
+
+func Test_StartLogProducerStillStartsWithTooLowTimeout(t *testing.T) {
+	ctx := context.Background()
+	req := ContainerRequest{
+		FromDockerfile: FromDockerfile{
+			Context:    "./testdata/",
+			Dockerfile: "echoserver.Dockerfile",
+		},
+		ExposedPorts: []string{"8080/tcp"},
+		WaitingFor:   wait.ForLog("ready"),
+	}
+
+	gReq := GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	}
+
+	c, err := GenericContainer(ctx, gReq)
+	require.NoError(t, err)
+	terminateContainerOnEnd(t, ctx, c)
+
+	g := TestLogConsumer{
+		Msgs:     []string{},
+		Done:     make(chan bool),
+		Accepted: devNullAcceptorChan(),
+	}
+
+	c.FollowOutput(&g)
+
+	err = c.StartLogProducer(ctx, WithLogProducerTimeout(4*time.Second))
+	require.NoError(t, err, "should still start with too low timeout")
+}
+
+func Test_StartLogProducerStillStartsWithTooHighTimeout(t *testing.T) {
+	ctx := context.Background()
+	req := ContainerRequest{
+		FromDockerfile: FromDockerfile{
+			Context:    "./testdata/",
+			Dockerfile: "echoserver.Dockerfile",
+		},
+		ExposedPorts: []string{"8080/tcp"},
+		WaitingFor:   wait.ForLog("ready"),
+	}
+
+	gReq := GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	}
+
+	c, err := GenericContainer(ctx, gReq)
+	require.NoError(t, err)
+	terminateContainerOnEnd(t, ctx, c)
+
+	g := TestLogConsumer{
+		Msgs:     []string{},
+		Done:     make(chan bool),
+		Accepted: devNullAcceptorChan(),
+	}
+
+	c.FollowOutput(&g)
+
+	err = c.StartLogProducer(ctx, WithLogProducerTimeout(61*time.Second))
+	require.NoError(t, err, "should still start with too high timeout")
 }
